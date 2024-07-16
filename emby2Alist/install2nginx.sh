@@ -21,5 +21,5 @@ if [ ! -n "$api" ]; then
     echo "不替换EmbyAPI"
 else
     echo 输入的Emby_API是：$api
-    sudo sed -i "s/f839390f50a648fd92108bc11ca6730a/$api/" /etc/nginx/emby2alist/config/constant.js
+    sudo sed -i "s/f839390f50a648fd92108bc11ca6730a/$api/" /etc/nginx/emby2alist/constant.js
 fi
