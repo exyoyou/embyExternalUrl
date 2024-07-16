@@ -36,6 +36,10 @@ const alistPublicAddr = "http://youralist.com:5244";
 // 字符串头,用于特殊匹配判断
 const strHead = {
   lanIp: ["172.", "10.", "192.", "[fd00:"], // 局域网ip头
+  xEmbyClients: {
+    seekBug: ["Emby for iOS", "Infuse"],
+    maybeProxy: ["Emby Web", "Emby for iOS", "Infuse"],
+  },
   "115": "115.com",
   ali: "aliyundrive.net",
 };
@@ -45,7 +49,7 @@ const routeCacheConfig = {
   // 总开关,是否开启路由缓存,此为一级缓存,添加阶段为 redirect 和 proxy 之前
   // 短时间内同客户端访问相同资源不会再做判断和请求 alist,有限的防抖措施,出现问题可以关闭此选项
   enable: true,
-  // 二级缓存开关,仅针对直链,添加阶段为进入单集详情页,cilentSelfAlistRule 中的和首页直接播放的不生效
+  // 二级缓存开关,仅针对直链,添加阶段为进入单集详情页,clientSelfAlistRule 中的和首页直接播放的不生效
   enableL2: false,
   // 缓存键表达式,默认值好处是命中范围大,但会导致 routeRule 中针对设备的规则失效,多个变量可自行组合修改,冒号分隔
   // 注意 jellyfin 是小写开头 mediaSourceId
@@ -53,8 +57,8 @@ const routeCacheConfig = {
 };
 
 // 指定需要获取符号链接真实路径的规则,优先级在 mediaMountPath 和 routeRule 之间
-// 注意前提条件是此程序或容器必须挂载或具有对应目录的读取权限,否则将跳过处理,不生效
-// 此参数仅在软连接后的文件名和原始文件名不一致或路径差异较大时使用,其余情况建议用 mediaPathMapping
+// 注意前提条件是此程序或容器必须挂载或具有对应目录的读取权限,否则将跳过处理,回源中转
+// 此参数仅在软链接后的文件名和原始文件名不一致或路径差异较大时使用,其余情况建议用 mediaPathMapping
 // 参数1: 0: startsWith(str), 1: endsWith(str), 2: includes(str), 3: match(/ain/g)
 // 参数2: 匹配目标,对象为媒体服务入库的文件路径(Item.Path)
 const symlinkRule = [
@@ -81,22 +85,22 @@ const routeRule = [
   // ["r.args.X-Emby-Device-Id", 0, "d4f30461-ec5c-488d-b04a-783e6f419eb1"], // 链接入参,设备id
   // ["r.args.X-Emby-Device-Name", 0, "Microsoft Edge Windows"], // 链接入参,设备名称
   // ["r.args.UserId", 0, "ac0d220d548f43bbb73cf9b44b2ddf0e"], // 链接入参,用户id
-  // 以下规则代表禁用["Emby Web", "Emby for iOS", "Infuse"]中的[本地挂载文件或 alist 返回的链接]的 115 直链功能
-  // ["115-alist", "r.args.X-Emby-Client", 0, ["Emby Web", "Emby for iOS", "Infuse"]], // 链接入参,客户端类型
+  // 以下规则代表禁用 strHead.xEmbyClients.maybeProxy 中的[本地挂载文件或 alist 返回的链接]的 115 直链功能
+  // ["115-alist", "r.args.X-Emby-Client", 0, strHead.xEmbyClients.maybeProxy], // 链接入参,客户端类型
   // ["115-alist", "alistRes", 0, strHead["115"]],
-  // ["115-local", "r.args.X-Emby-Client", 0, ["Emby Web", "Emby for iOS", "Infuse"]],
+  // ["115-local", "r.args.X-Emby-Client", 0, strHead.xEmbyClients.maybeProxy],
   // ["115-local", "filePath", 0, "/mnt/115"],
   // 注意非"proxy"无法使用"alistRes"条件,因为没有获取 alist 直链的过程
   // ["proxy", "filePath", 0, "/mnt/sda1"],
   // ["redirect", "filePath", 0, "/mnt/sda2"],
   // ["transcode", "filePath", 0, "/mnt/sda3"],
-  // ["transcode", "115-local", "r.args.X-Emby-Client", 0, ["Emby Web", "Emby for iOS", "Infuse"]],
+  // ["transcode", "115-local", "r.args.X-Emby-Client", 0, strHead.xEmbyClients.maybeProxy],
   // ["transcode", "115-local", "filePath", 0, "/mnt/115"],
   // ["block", "filePath", 0, "/mnt/sda4"],
 ];
 
 // 路径映射,会在 mediaMountPath 之后从上到下依次全部替换一遍,不要有重叠,注意 /mnt 会先被移除掉了
-// 参数1: 0: 默认做字符串替换, 1: 前插, 2: 尾插
+// 参数1: 0: 默认做字符串替换replace一次, 1: 前插, 2: 尾插, 3: replaceAll替换全部
 // 参数2: 0: 默认只处理/开头的路径且不为 strm, 1: 只处理 strm 内部为/开头的相对路径, 2: 只处理 strm 内部为远程链接的
 // 参数3: 来源, 参数4: 目标
 const mediaPathMapping = [
@@ -109,28 +113,44 @@ const mediaPathMapping = [
   // [2, 2, "?xxx"],
 ];
 
-// 指定是否转发由 njs 获取 strm 重定向后直链地址的规则,例如 strm 内部为局域网 ip 或链接需要验证
-// 参数1: 0: startsWith(str), 1: endsWith(str), 2: includes(str), 3: match(/ain/g)
-// 参数2: 匹配目标,对象为 mediaPathMapping 映射后的 strm 内部链接
+// 指定是否转发由 njs 获取 strm/远程链接 重定向后直链地址的规则,例如 strm/远程链接 内部为局域网 ip 或链接需要验证
+// 参数1: 分组名,组内为与关系(全部匹配),多个组和没有分组的规则是或关系(任一匹配),然后下面参数序号-1
+// 参数2: 匹配类型或来源(字符串参数类型),默认为 "filePath": mediaPathMapping 映射后的 strm/远程链接 内部链接
+// ,有分组时不可省略填写,可为表达式
+// 参数3: 0: startsWith(str), 1: endsWith(str), 2: includes(str), 3: match(/ain/g)
+// 参数4: 匹配目标,为数组的多个参数时,数组内为或关系(任一匹配)
 const redirectStrmLastLinkRule = [
   [0, strHead.lanIp.map(s => "http://" + s)],
   // [0, alistAddr],
   // [0, "http:"],
-  // 参数3: 请求验证类型,当前 alistAddr 不需要此参数
-  // 参数4: 当前 alistAddr 不需要此参数,alistSignExpireTime
-  // [0, "http://otheralist1.com", "sign", `${alistToken}:${alistSignExpireTime}`],
+  // 参数5: 请求验证类型,当前 alistAddr 不需要此参数
+  // 参数6: 当前 alistAddr 不需要此参数,alistSignExpireTime
+  // [3, "http://otheralist1.com", "sign", `${alistToken}:${alistSignExpireTime}`],
+  // useGroup01 同时满足才命中
+  // ["useGroup01", "filePath", "startsWith", strHead.lanIp.map(s => "http://" + s)], // 目标地址为内网
+  // ["useGroup01", "r.args.X-Emby-Client", "startsWith:not", strHead.xEmbyClients.seekBug], // 链接入参,客户端类型
+  // docker 注意必须为 host 模式,不然此变量全部为内网ip,判断无效,nginx 内置变量不带$,客户端地址($remote_addr)
+  // ["useGroup01", "r.variables.remote_addr", 0, strHead.lanIp], // 远程客户端为内网
 ];
 
 // 指定客户端自己请求并获取 alist 直链的规则,代码优先级在 redirectStrmLastLinkRule 之后
 // 特殊情况使用,则此处必须使用域名且公网畅通,用不着请保持默认
-// 参数1: 0: startsWith(str), 1: endsWith(str), 2: includes(str), 3: match(/ain/g)
-// 参数2: 匹配目标,对象为 Alist 接口返回的链接 raw_url
-// 参数3: 指定转发给客户端的 alist 的 host 前缀,兼容 sign 参数
-const cilentSelfAlistRule = [
+// 参数1: 分组名,组内为与关系(全部匹配),多个组和没有分组的规则是或关系(任一匹配),然后下面参数序号-1
+// 参数2: 匹配类型或来源(字符串参数类型),优先级高"filePath": 文件路径(Item.Path),默认为"alistRes": alist 返回的链接 raw_url
+// ,有分组时不可省略填写,可为表达式
+// 参数3: 0: startsWith(str), 1: endsWith(str), 2: includes(str), 3: match(/ain/g)
+// 参数4: 匹配目标,为数组的多个参数时,数组内为或关系(任一匹配)
+// 参数5: 指定转发给客户端的 alist 的 host 前缀,兼容 sign 参数
+const clientSelfAlistRule = [
   // "Emby for iOS"和"Infuse"对于 115 的进度条拖动依赖于此
   // 如果 nginx 为 https,则此 alist 也必须 https,浏览器行为客户端会阻止非 https 请求
   [2, strHead["115"], alistPublicAddr],
   // [2, strHead.ali, alistPublicAddr],
+  // 优先使用 filePath,可省去一次查询 alist,如驱动为 alias,则应使用 alistRes
+  // ["115-local", "filePath", 0, "/mnt/115", alistPublicAddr],
+  // ["115-local", "r.args.X-Emby-Client", 0, strHead.xEmbyClients.seekBug], // 链接入参,客户端类型
+  // ["115-alist", "alistRes", 2, strHead["115"], alistPublicAddr],
+  // ["115-alist", "r.args.X-Emby-Client", 0, strHead.xEmbyClients.seekBug],
 ];
 
 // !!!实验功能,转码配置,默认 false,将按之前逻辑禁止转码处理并移除转码选项参数,与 emby 配置无关
@@ -203,6 +223,35 @@ const streamConfig = {
   useRealFileName: false,
 };
 
+// 搜索接口增强配置
+const searchConfig = {
+  // 开启脚本的部分交互性功能
+  interactiveEnable: false,
+  // 限定交互性功能的隔离,取值来源为带参数的 request_uri 字符串
+  // 不带协议与域名,仅作包含匹配,多个值为或的关系,空数组为不隔离
+  interactiveEnableRule: [
+    // "ac0d220d548f43bbb73cf9b44b2ddf0e", // request_uri path level userId
+    // "2d427412-43e1-49e4-a1db-fa17c04d49db", // X-Emby-Device-Id
+  ],
+};
+
+// nginx 配置 Start
+
+const nginxConfig = {
+  // 禁用上游服务的 docs 页面
+  disableDocs: true,
+};
+
+// for js_set
+function getDisableDocs(r) {
+  const value = nginxConfig.disableDocs 
+    && !ngx.shared["tmpDict"].get("opendocs");
+  // r.log(`getDisableDocs: ${value}`);
+  return value;
+}
+
+// nginx 配置 End
+
 // for js_set
 function getEmbyHost(r) {
   return embyHost;
@@ -232,14 +281,17 @@ export default {
   routeRule,
   mediaPathMapping,
   redirectStrmLastLinkRule,
-  cilentSelfAlistRule,
+  clientSelfAlistRule,
   transcodeConfig,
   embyNotificationsAdmin,
   embyRedirectSendMessage,
   itemHiddenRule,
   streamConfig,
+  searchConfig,
   getEmbyHost,
   getTranscodeEnable,
   getTranscodeType,
   getImageCachePolicy,
+  nginxConfig,
+  getDisableDocs,
 }

@@ -1,4 +1,4 @@
-// 如果使用拆分配置,请注意填写 config 下的使用到的配置文件
+// 如果使用拆分配置,请注意填写 config 下使用到的配置文件
 
 import commonConfig from "./config/constant-common.js";
 import mountConfig from "./config/constant-mount.js";
@@ -7,6 +7,7 @@ import symlinkConfig from "./config/constant-symlink.js";
 import strmConfig from "./config/constant-strm.js";
 import transcodeConfig from "./config/constant-transcode.js";
 import extConfig from "./config/constant-ext.js";
+import nginxConfig from "./config/constant-nginx.js";
 
 // 必填项,根据实际情况修改下面的设置
 
@@ -46,7 +47,7 @@ export default {
   alistSignEnable: mountConfig.alistSignEnable,
   alistSignExpireTime: mountConfig.alistSignExpireTime,
   alistPublicAddr: mountConfig.alistPublicAddr,
-  cilentSelfAlistRule: mountConfig.cilentSelfAlistRule,
+  clientSelfAlistRule: mountConfig.clientSelfAlistRule,
 
   routeCacheConfig: proConfig.routeCacheConfig,
   routeRule: proConfig.routeRule,
@@ -60,9 +61,13 @@ export default {
   embyRedirectSendMessage: extConfig.embyRedirectSendMessage,
   itemHiddenRule: extConfig.itemHiddenRule,
   streamConfig: extConfig.streamConfig,
+  searchConfig: extConfig.searchConfig,
 
   getEmbyHost,
   getTranscodeEnable,
   getTranscodeType,
   getImageCachePolicy,
+
+  nginxConfig: nginxConfig.nginxConfig,
+  getDisableDocs: nginxConfig.getDisableDocs,
 }

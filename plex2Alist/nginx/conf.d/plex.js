@@ -5,6 +5,7 @@
 import config from "./constant.js";
 import util from "./common/util.js";
 import events from "./common/events.js";
+import ngxExt from "./modules/ngx-ext.js";
 
 const xml = require("xml");
 
@@ -94,7 +95,7 @@ async function redirect2Pan(r) {
   }
   r.warn(`mount plex file path: ${mediaServerRes.path}`);
 
-  // routeRule, must before mediaPathMapping
+  // routeRule, not must before mediaPathMapping, before is simple, can ignore mediaPathMapping
   const routeMode = util.getRouteMode(r, mediaServerRes.path, false, notLocal);
   r.warn(`getRouteMode: ${routeMode}`);
   if (util.ROUTE_ENUM.proxy == routeMode) {
@@ -137,17 +138,25 @@ async function redirect2Pan(r) {
   r.warn(`mapped plex file path: ${mediaItemPath}`);
 
   // strm file inner remote link redirect,like: http,rtsp
+  // not only strm, mediaPathMapping maybe used remote link
   isRemote = !util.isAbsolutePath(mediaItemPath);
   if (isRemote) {
-    const rule = util.redirectStrmLastLinkRuleFilter(mediaItemPath);
-    if (!!rule && rule.length > 0) {
-      r.warn(`filePath hit redirectStrmLastLinkRule: ${JSON.stringify(rule)}`);
-      let directUrl = await fetchStrmLastLink(mediaItemPath, rule[2], rule[3], ua);
+    let rule = util.simpleRuleFilter(
+      r, config.redirectStrmLastLinkRule, mediaItemPath, 
+      util.SOURCE_STR_ENUM.filePath, "redirectStrmLastLinkRule"
+    );
+    if (rule && rule.length > 0) {
+      if (!Number.isInteger(rule[0])) {
+        // convert groupRule remove groupKey and sourceValue
+        r.warn(`convert groupRule remove groupKey and sourceValue`);
+        rule = rule.slice(2);
+      }
+      let directUrl = await ngxExt.fetchLastLink(mediaItemPath, rule[2], rule[3], ua);
       if (!!directUrl) {
         mediaItemPath = directUrl;
       } else {
-        r.warn(`warn: fetchStrmLastLink, not expected result, failback once`);
-        directUrl = await fetchStrmLastLink(util.strmLinkFailback(strmLink), rule[2], rule[3], ua);
+        r.warn(`warn: fetchLastLink, not expected result, failback once`);
+        directUrl = await ngxExt.fetchLastLink(ngxExt.lastLinkFailback(mediaItemPath), rule[2], rule[3], ua);
         if (!!directUrl) {
           mediaItemPath = directUrl;
         }
@@ -161,6 +170,10 @@ async function redirect2Pan(r) {
     }
     return redirect(r, mediaItemPath);
   }
+
+  // clientSelfAlistRule, before fetch alist
+  const alistDUrl = util.getClientSelfAlistLink(r, mediaItemPath);
+  if (alistDUrl) { return redirect(r, alistDUrl); }
 
   // fetch alist direct link
   const alistToken = config.alistToken;
@@ -183,7 +196,8 @@ async function redirect2Pan(r) {
     } else if (util.ROUTE_ENUM.block == routeMode) {
       return r.return(403, "blocked");
     }
-    return redirect(r, alistRes);
+    // clientSelfAlistRule, after fetch alist, cover raw_url
+    return redirect(r, util.getClientSelfAlistLink(r, alistRes, alistFilePath) ?? alistRes);
   }
   r.warn(`alistRes: ${alistRes}`);
   if (alistRes.startsWith("error403")) {
@@ -253,7 +267,7 @@ async function fetchAlistPathApi(alistApiPath, alistFilePath, alistToken, ua) {
       if (result.message == "success") {
         // alist /api/fs/get
         if (result.data.raw_url) {
-          return handleAlistRawUrl(result, alistFilePath);
+          return result.data.raw_url;
         }
         // alist /api/fs/list
         return result.data.content.map((item) => item.name).join(",");
@@ -267,102 +281,6 @@ async function fetchAlistPathApi(alistApiPath, alistFilePath, alistToken, ua) {
     }
   } catch (error) {
     return `error: alist_path_api fetchAlistFiled ${error}`;
-  }
-}
-
-function handleAlistRawUrl(alistRes, alistFilePath) {
-  let rawUrl = alistRes.data.raw_url;
-  const alistSign = alistRes.data.sign;
-  const cilentSelfAlistRule = config.cilentSelfAlistRule;
-  if (cilentSelfAlistRule.length > 0) {
-    cilentSelfAlistRule.some(rule => {
-      if (util.strMatches(rule[0], rawUrl, rule[1])) {
-        ngx.log(ngx.WARN, `hit cilentSelfAlistRule: ${JSON.stringify(rule)}`);
-        if (!rule[2]) {
-          ngx.log(ngx.ERR, `alistPublicAddr is required`);
-          return true;
-        }
-        rawUrl = `${rule[2]}/d${encodeURI(alistFilePath)}${!alistSign ? "" : `?sign=${alistSign}`}`;
-        return true;
-      }
-    });
-  }
-  return rawUrl;
-}
-
-async function fetchAlistAuthApi(url, username, password) {
-  const body = {
-    username: username,
-    password: password,
-  };
-  try {
-    const response = await ngx.fetch(url, {
-      method: "POST",
-      max_response_body_size: 1024,
-      body: JSON.stringify(body),
-    });
-    if (response.ok) {
-      const result = await response.json();
-      if (!result) {
-        return `error: alist_auth_api response is null`;
-      }
-      if (result.message == "success") {
-        return result.data.token;
-      }
-      return `error500: alist_auth_api ${result.code} ${result.message}`;
-    } else {
-      return `error: alist_auth_api ${response.status} ${response.statusText}`;
-    }
-  } catch (error) {
-    return `error: alist_auth_api filed ${error}`;
-  }
-}
-
-/**
- * fetchStrmLastLink, actually this just once request,currently sufficient
- * @param {String} strmLink eg: "https://alist/d/file.xxx"
- * @param {String} authType eg: "sign"
- * @param {String} authInfo eg: "sign:token:expireTime"
- * @param {String} ua 
- * @returns redirect after link
- */
-async function fetchStrmLastLink(strmLink, authType, authInfo, ua) {
-  // this is for multiple instances alist add sign
-  if (authType && authType === "sign" && authInfo) {
-    const arr = authInfo.split(":");
-    strmLink = util.addAlistSign(strmLink, arr[0], parseInt(arr[1]));
-  }
-  // this is for current alist add sign
-  if (!!config.alistSignEnable) {
-    strmLink = util.addAlistSign(strmLink, config.alistToken, config.alistSignExpireTime);
-  }
-  try {
-  	// fetch Api ignore nginx locations,ngx.ferch,redirects are not handled
-    const response = await ngx.fetch(encodeURI(strmLink), {
-      method: "HEAD",
-      headers: {
-        "User-Agent": ua,
-      },
-      max_response_body_size: 1024
-    });
-    const contentType = response.headers["Content-Type"];
-    ngx.log(ngx.WARN, `fetchStrmLastLink response.status: ${response.status}, contentType: ${contentType}`);
-    // response.redirected api error return false
-    if ((response.status > 300 && response.status < 309) || response.status == 403) {
-      // if handle really LastLink, modify here to recursive and return link on status 200
-      return response.headers["Location"];
-    } else if (response.status == 200) {
-      // alist 401 but return 200 status code
-      if (contentType.includes("application/json")) {
-        ngx.log(ngx.ERR, `fetchStrmLastLink alist mayby return 401, check your alist sign or auth settings`);
-        return;
-      }
-      ngx.log(ngx.ERR, `error: fetchStrmLastLink, not expected result`);
-    } else {
-      ngx.log(ngx.ERR, `error: fetchStrmLastLink: ${response.status} ${response.statusText}`);
-    }
-  } catch (error) {
-    ngx.log(ngx.ERR, `error: fetchStrmLastLink: ${error}`);
   }
 }
 

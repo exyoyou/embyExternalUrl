@@ -47,7 +47,7 @@ export default {
   alistSignEnable: mountConfig.alistSignEnable,
   alistSignExpireTime: mountConfig.alistSignExpireTime,
   alistPublicAddr: mountConfig.alistPublicAddr,
-  cilentSelfAlistRule: mountConfig.cilentSelfAlistRule,
+  clientSelfAlistRule: mountConfig.clientSelfAlistRule,
 
   routeCacheConfig: proConfig.routeCacheConfig,
   routeRule: proConfig.routeRule,
@@ -61,6 +61,7 @@ export default {
   embyRedirectSendMessage: extConfig.embyRedirectSendMessage,
   itemHiddenRule: extConfig.itemHiddenRule,
   streamConfig: extConfig.streamConfig,
+  searchConfig: extConfig.searchConfig,
 
   getEmbyHost,
   getTranscodeEnable,
