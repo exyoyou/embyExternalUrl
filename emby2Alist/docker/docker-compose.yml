@@ -22,7 +22,6 @@ services:
     restart: unless-stopped
     depends_on:
        - yoyo_rclone_alist
-       - yoyo_alist
 
 
   yoyo_alist:
@@ -36,8 +35,6 @@ services:
       - /media:/media
     ports:
       - 5244:5244
-    depends_on:
-      - yoyo_rclone_alist
     restart: unless-stopped
     
   yoyo_rclone_alist:
@@ -56,6 +53,8 @@ services:
     security_opt:
       - apparmor:unconfined
     restart: unless-stopped
+    depends_on:
+      - yoyo_alist
     command: mount alist_webdav:/ /data --allow-other --allow-non-empty --file-perms 0777 --multi-thread-streams 1024 --multi-thread-cutoff 128M --network-mode --vfs-cache-mode full --vfs-cache-max-size 10G --vfs-cache-max-age 12h --buffer-size 64K --vfs-read-chunk-size 1M --vfs-read-chunk-size-limit 50M --no-modtime --no-checksum --vfs-read-wait 0ms -v --ignore-size
 
 
