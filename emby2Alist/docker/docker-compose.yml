@@ -14,7 +14,7 @@ services:
     devices:
       - /dev/dri:/dev/dri
     volumes:
-      - /var/lib/emby:/config
+      - .config/emby:/config
       - /mnt:/mnt
       - /media:/media
     ports:
@@ -30,7 +30,7 @@ services:
       - TZ=Asia/Hong_Kong
     image: xhofe/alist:latest
     volumes:
-      - /opt/alist/data:/opt/alist/data
+      - .config/alist:/opt/alist/data
       - /mnt:/mnt
       - /media:/media
     ports:
@@ -73,9 +73,9 @@ services:
       - yoyo_emby
     volumes:
       # - /etc/nginx:/etc/nginx
-      - /etc/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - /etc/nginx/emby2alist:/etc/nginx/emby2alist/
-      - /etc/nginx/conf.d:/etc/nginx/conf.d
-      - /etc/nginx/embyCache:/var/cache/nginx/emby
+      - .config/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - .config/nginx/emby2alist:/etc/nginx/emby2alist/
+      - .config/nginx/conf.d:/etc/nginx/conf.d
+      - .config/nginx/embyCache:/var/cache/nginx/emby
     restart: unless-stopped
     
